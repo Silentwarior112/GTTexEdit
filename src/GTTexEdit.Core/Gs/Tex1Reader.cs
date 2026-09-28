@@ -3,8 +3,7 @@ using System.Runtime.InteropServices;
 
 namespace GTTexEdit.Core.Gs;
 
-/* Tex1 (TextureSet1, GT3 / GT4 / TT), little-endian. 010 Editor template:
- * https://github.com/Nenkai/GT-File-Specifications-Documentation/blob/master/Formats/GT4/GT4_Tex1_TexSet.bt
+/* Tex1 (TextureSet1, GT3 / GT4 / TT)
  *
  *   0x00 "Tex1"          0x04 u32 reloc ptr (0 on disk)   0x08 u32 0          0x0C u32 set size
  *   0x10 u16 base TBP (0, remapped at runtime)             0x12 u16 size of the set in GS blocks

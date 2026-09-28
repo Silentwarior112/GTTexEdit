@@ -4,8 +4,7 @@ using System.Text;
 namespace GTTexEdit.Core;
 
 /// <summary>
-/// Positioned reader over a byte[] with switchable endianness. Replaces Syroot's BinaryStream for
-/// every format this tool parses (all inputs are fully in memory).
+/// Positioned reader over a byte[] with switchable endianness.
 /// </summary>
 public sealed class ByteReader
 {
