@@ -1,0 +1,11 @@
+C:\Users\User\Desktop\GTGPBc\GTTexEdit\src\GTTexEdit.Core\bin\Release\net10.0\GTTexEdit.Core.deps.json
+C:\Users\User\Desktop\GTGPBc\GTTexEdit\src\GTTexEdit.Core\bin\Release\net10.0\GTTexEdit.Core.dll
+C:\Users\User\Desktop\GTGPBc\GTTexEdit\src\GTTexEdit.Core\bin\Release\net10.0\GTTexEdit.Core.pdb
+C:\Users\User\Desktop\GTGPBc\GTTexEdit\src\GTTexEdit.Core\obj\Release\net10.0\GTTexEdit.Core.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\User\Desktop\GTGPBc\GTTexEdit\src\GTTexEdit.Core\obj\Release\net10.0\GTTexEdit.Core.AssemblyInfoInputs.cache
+C:\Users\User\Desktop\GTGPBc\GTTexEdit\src\GTTexEdit.Core\obj\Release\net10.0\GTTexEdit.Core.AssemblyInfo.cs
+C:\Users\User\Desktop\GTGPBc\GTTexEdit\src\GTTexEdit.Core\obj\Release\net10.0\GTTexEdit.Core.csproj.CoreCompileInputs.cache
+C:\Users\User\Desktop\GTGPBc\GTTexEdit\src\GTTexEdit.Core\obj\Release\net10.0\GTTexEdit.Core.dll
+C:\Users\User\Desktop\GTGPBc\GTTexEdit\src\GTTexEdit.Core\obj\Release\net10.0\refint\GTTexEdit.Core.dll
+C:\Users\User\Desktop\GTGPBc\GTTexEdit\src\GTTexEdit.Core\obj\Release\net10.0\GTTexEdit.Core.pdb
+C:\Users\User\Desktop\GTGPBc\GTTexEdit\src\GTTexEdit.Core\obj\Release\net10.0\ref\GTTexEdit.Core.dll

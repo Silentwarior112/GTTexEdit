@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>GTTexEdit</AssemblyName>
+    <RootNamespace>GTTexEdit</RootNamespace>
+
+    <!-- Read by ApplicationConfiguration.Initialize() (Program.cs). -->
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationVisualStyles>true</ApplicationVisualStyles>
+
+    <!-- BCL only: this project must never take a PackageReference. No trimming: WinForms does not support it. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GTTexEdit.Core\GTTexEdit.Core.csproj" />
+  </ItemGroup>
+
+</Project>

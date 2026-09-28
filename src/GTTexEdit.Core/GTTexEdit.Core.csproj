@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>GTTexEdit.Core</RootNamespace>
+    <!-- BCL only: this library must never take a PackageReference. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="GTTexEdit.Tests" />
+    <InternalsVisibleTo Include="TexDbg" />
+  </ItemGroup>
+
+</Project>

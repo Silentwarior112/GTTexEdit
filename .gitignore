@@ -1,0 +1,26 @@
+# Build output
+bin/
+obj/
+.vs/
+.idea/
+*.user
+*.suo
+*.log
+
+# Test scratch output: screenshots and files written by the test runs
+tests/ui/work/
+
+# Research DATA, not research findings. Everything under these is derived from the game's own files - extracted
+# textures, GS memory dumps, palettes, per-car CSV surveys - and runs to about a gigabyte. The findings they
+# produced are in research/notes and research/*.md, which ARE tracked.
+research/work/
+research/survey/
+research/workflow/
+__pycache__/
+*.pyc
+*.pkl
+
+# Game files are never part of this repository
+car_bin/
+crs_bin/
+*.pat
