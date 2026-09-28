@@ -76,5 +76,3 @@ While not intended, the tool can also read any file that has a Tex1 embedded in 
 ## Technical Information
 
 * [docs/internals.md](docs/internals.md) - what the files hold, what an edit reaches, and every feature in detail
-* `research/` - the measurements all of it is built on, taken over every car and course in both games
-* `tools/TexDbg` - a console tool that dumps everything the editor knows about a file
