@@ -13,6 +13,7 @@ While not intended, the tool can also read any file that has a Tex1 embedded in 
 <p align="center">
   <img src="https://github.com/Silentwarior112/GTTexEdit/blob/main/docs/variation-editor.png">
 </p>
+
 - The tool presents the content of a Tex1 on a per-buffer level, as those are the real objects inside them.
   Most buffers are single textures, but some contain multiple. These multi-texture buffers employ
   complex optimization techniques that save on blocks:
@@ -23,6 +24,7 @@ While not intended, the tool can also read any file that has a Tex1 embedded in 
 - Each buffer shows the resolution, color depth, block count, and the number of textures inside it.
 
 ### Texture editor
+
 - Editing a texture involves re-baking the buffer it lived in. For a single texture buffer it's simple enough,
   but a multi-texture buffer requires providing each 'layer' for a new buffer. This lets you employ
   the same optimization techniques in original buffers.
@@ -34,13 +36,14 @@ While not intended, the tool can also read any file that has a Tex1 embedded in 
 <p align="center">
   <img src="https://github.com/Silentwarior112/GTTexEdit/blob/main/docs/swatch-editor.png">
 </p>
+
 - The tool also contains a full suite to modify and add car variations (car colors):
   - Gran Turismo 3's Tex1-based CLUTs and Gran Turismo 4's external .pat systems are both supported
-    via a unified UI that handles the technical differences under the hood.
+    via a unified UI that handles the technical differences under the hood. <br>
   - Duplicate variations, export the patched portions only or the full set as a swatch sheet with texture previews
-    on the left, and the recolor-able swatches on the right side.
-  - Swatch editor: In your favorite image editor, recolor the swatches on the right, then save.
-  - Import swatch sheets to recolor a variation.
+    on the left, and the recolor-able swatches on the right side. <br>
+  - Swatch editor: In your favorite image editor, recolor the swatches on the right, then save. <br>
+  - Import swatch sheets to recolor a variation. <br>
 
   #### Recoloring technique for variations
   
@@ -59,6 +62,7 @@ While not intended, the tool can also read any file that has a Tex1 embedded in 
 <p align="center">
   <img src="https://github.com/Silentwarior112/GTTexEdit/blob/main/docs/variation-editor.png">
 </p>
+
   - Closely tied to the variation editor, this presents a spreadsheet of the car's material blocks.
   - Cars with variations have highlighted cells to indicate which materials change with variations.
   - 3 Presets available: Gloss, Metallic, Flat
