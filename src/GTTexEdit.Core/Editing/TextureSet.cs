@@ -34,6 +34,7 @@ public sealed class TextureView
         Tfx = r.Tfx;
         IsWindow = isWindow;
         SourcesByVariation = paletteSources;
+        PaletteEntryBytes = r.Cpsm is GsPsm.PSMCT16 or GsPsm.PSMCT16S ? 2 : 4;
     }
 
     /// <summary>
@@ -69,6 +70,13 @@ public sealed class TextureView
 
     /// <summary>16, 256, or 0 for a true-colour view.</summary>
     public int PaletteSize { get; private set; }
+
+    /// <summary>
+    /// How many bytes one palette entry is: four for the usual 32-bit colours, TWO where the palette is 16-bit
+    /// (RGBA5551 - five bits a channel and one bit of alpha). GT3 courses and cars use those for about one
+    /// texture in twelve; GT4 cars use none.
+    /// </summary>
+    public int PaletteEntryBytes { get; private set; } = 4;
 
     public int Cbp { get; private set; }
     public int Csa { get; private set; }
@@ -777,15 +785,26 @@ public sealed class TextureSet
         ? Reader(0).Decode(view.Index, Math.Clamp(variation, 0, VariationCount - 1))
         : Reader(variation).Decode(view.Index);
 
+    /// <summary>Where one view's palette entry lives in the model - for tools that want to see what is shared.</summary>
+    internal int SourceOfFor(TextureView view, int entry) => view.SourceOf(entry);
+
+    /// <summary>The model's own bytes at an offset - for tools that want to see what is really there.</summary>
+    internal void ReadAt(int offset, Span<byte> into) => _model.ReadBytes(offset, into);
+
     /// <summary>A palette entry as PNG-style RGBA (0xAABBGGRR); GS alpha 0..0x80 is shown doubled.</summary>
     public uint GetPaletteColor(TextureView view, int entry, int variation = 0)
     {
+        ArgumentNullException.ThrowIfNull(view);
         int source = view.SourceOf(entry, variation);
         if (source < 0)
             return 0;
+
         Span<byte> bytes = stackalloc byte[4];
-        _model.ReadBytes(ByteVariation(variation), source, bytes);
-        return Tex1Reader.GsToPngAlpha(BinaryPrimitives.ReadUInt32LittleEndian(bytes));
+        _model.ReadBytes(ByteVariation(variation), source, bytes[..view.PaletteEntryBytes]);
+        uint stored = view.PaletteEntryBytes == 2
+            ? Tex1Reader.FromRgba5551(BinaryPrimitives.ReadUInt16LittleEndian(bytes))
+            : BinaryPrimitives.ReadUInt32LittleEndian(bytes);
+        return Tex1Reader.GsToPngAlpha(stored);
     }
 
     public bool IsPaletteEntryEditable(TextureView view, int entry) => view.SourceOf(entry) >= 0;
@@ -812,7 +831,7 @@ public sealed class TextureSet
         if (view.SourceOf(entry) < 0)
             return Coverage.None;
         if (Variations != VariationSource.ClutPatch)
-            return _model.GetCoverage(view.SourceOf(entry), 4);
+            return _model.GetCoverage(view.SourceOf(entry), view.PaletteEntryBytes);
 
         // GT3 gives each variation its own palette, so an entry varies when those palettes disagree about it.
         for (int variation = 1; variation < VariationCount; variation++)
@@ -964,6 +983,35 @@ public sealed class TextureSet
     // ------------------------------------------------------------------------------------------------ editing
 
     /// <summary>
+    /// The bytes one palette entry becomes, and how many of them. A 16-bit palette is rounded to five bits a
+    /// channel and one bit of alpha, which is all it can hold; the stored alpha is kept where the shown alpha did
+    /// not change, because GS alpha above 0x80 also shows as 255 and must not be flattened by an edit to the RGB.
+    /// </summary>
+    private int EntryBytes(TextureView view, int source, int variation, uint color, Span<byte> bytes)
+    {
+        int width = view.PaletteEntryBytes;
+        Span<byte> had = stackalloc byte[4];
+        _model.ReadBytes(ByteVariation(variation), source, had[..width]);
+
+        if (width == 2)
+        {
+            ushort was = BinaryPrimitives.ReadUInt16LittleEndian(had);
+            ushort now = Tex1Reader.ToRgba5551(Tex1Reader.PngToGsAlpha(color));
+            if (Tex1Reader.GsToPngAlpha(Tex1Reader.FromRgba5551(was)) >> 24 == color >> 24)
+                now = (ushort)(now & 0x7FFF | was & 0x8000);     // the alpha bit is the one it had
+            BinaryPrimitives.WriteUInt16LittleEndian(bytes, now);
+            return 2;
+        }
+
+        uint stored = BinaryPrimitives.ReadUInt32LittleEndian(had);
+        uint value = Tex1Reader.GsToPngAlpha(stored) >> 24 == color >> 24
+            ? (color & 0x00FFFFFF) | (stored & 0xFF000000)
+            : Tex1Reader.PngToGsAlpha(color);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes, value);
+        return 4;
+    }
+
+    /// <summary>
     /// Sets a palette entry from a PNG-style colour. Reaches exactly this view: a CLUT slot has one user, and
     /// palette words never overlap pixels or another palette. Returns false when nothing changed.
     /// </summary>
@@ -971,20 +1019,13 @@ public sealed class TextureSet
     {
         int source = view.SourceOf(entry);
         if (source < 0)
-            throw new InvalidOperationException("This palette entry is not stored as a 32-bit word in the file and cannot be edited.");
+            throw new InvalidOperationException("This palette entry is not stored as plain bytes in the file and cannot be edited.");
         if (GetPaletteColor(view, entry) == color)
             return false;
 
-        // Keep the stored alpha when the shown alpha did not change: GS alpha above 0x80 also shows as 255.
         Span<byte> bytes = stackalloc byte[4];
-        _model.ReadBytes(source, bytes);
-        uint stored = BinaryPrimitives.ReadUInt32LittleEndian(bytes);
-        uint value = Tex1Reader.GsToPngAlpha(stored) >> 24 == color >> 24
-            ? (color & 0x00FFFFFF) | (stored & 0xFF000000)
-            : Tex1Reader.PngToGsAlpha(color);
-
-        BinaryPrimitives.WriteUInt32LittleEndian(bytes, value);
-        _model.WriteBytes(source, bytes);
+        int width = EntryBytes(view, source, 0, color, bytes);
+        _model.WriteBytes(source, bytes[..width]);
         Invalidate();
         return true;
     }
@@ -998,7 +1039,7 @@ public sealed class TextureSet
         ArgumentNullException.ThrowIfNull(view);
         variation = Math.Clamp(variation, 0, VariationCount - 1);
         if (view.SourceOf(entry, variation) < 0)
-            throw new InvalidOperationException("This palette entry is not stored as a 32-bit word in the file and cannot be edited.");
+            throw new InvalidOperationException("This palette entry is not stored as plain bytes in the file and cannot be edited.");
         if (GetPaletteColor(view, entry, variation) == color)
             return false;
 
@@ -1012,17 +1053,11 @@ public sealed class TextureSet
 
         int source = view.SourceOf(entry, variation);
         if (source < 0)
-            throw new InvalidOperationException("This palette entry is not stored as a 32-bit word in the file and cannot be edited.");
+            throw new InvalidOperationException("This palette entry is not stored as plain bytes in the file and cannot be edited.");
 
         Span<byte> bytes = stackalloc byte[4];
-        _model.ReadBytes(ByteVariation(variation), source, bytes);
-        uint stored = BinaryPrimitives.ReadUInt32LittleEndian(bytes);
-        uint value = Tex1Reader.GsToPngAlpha(stored) >> 24 == color >> 24
-            ? (color & 0x00FFFFFF) | (stored & 0xFF000000)
-            : Tex1Reader.PngToGsAlpha(color);
-
-        BinaryPrimitives.WriteUInt32LittleEndian(bytes, value);
-        _model.WriteVariation(ByteVariation(variation), source, bytes);
+        int width = EntryBytes(view, source, variation, color, bytes);
+        _model.WriteVariation(ByteVariation(variation), source, bytes[..width]);
         Invalidate();
         return true;
     }

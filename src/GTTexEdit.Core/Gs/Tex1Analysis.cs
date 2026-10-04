@@ -209,6 +209,27 @@ internal sealed class Tex1Analysis
     }
 
     /// <summary>Tex1-relative offset of the four bytes a GS word was uploaded from, whatever carried them, or -1.</summary>
+    /// <summary>
+    /// Where a HALFWORD of GS memory came from in the file - the two bytes of one entry of a 16-bit palette.
+    /// -1 when nothing in the file wrote it.
+    ///
+    /// It is the halfword's OWN provenance that answers this, not its word's: a 16-bit palette is sometimes
+    /// uploaded by a 16-bit transfer, and the GS packs two of those texels into a word from places in the file
+    /// that are not next to each other. Taking the word's source and picking a half of it reads the wrong two
+    /// bytes whenever that happens.
+    /// </summary>
+    public int ByteSourceOfHalf(int half)
+    {
+        int[] nibbles = NibbleSources();
+        long at = (long)half * 4;
+        int source = at >= 0 && at < nibbles.Length ? nibbles[(int)at] : -1;
+        if (source >= 0 && source % 2 == 0)
+            return source / 2;
+
+        int word = ByteSourceOfWord(half / 2);
+        return word < 0 ? -1 : word + half % 2 * 2;
+    }
+
     public int ByteSourceOfWord(int word)
     {
         if (word >= 0 && word < WordSources.Length && WordSources[word] >= 0)
@@ -499,12 +520,6 @@ internal sealed class Tex1Analysis
     /// in such a block appear to overlap its neighbours, and renders textures that use one as blank transparency.
     /// Halving the offset within the block is what the file itself says: eight palettes, 32 bytes each, no gaps.
     /// </summary>
-    private static int HalfOfClut(int cbp, int address, int csa)
-    {
-        int blockStart = cbp * GsFormat.BlockWords * 2;      // the block, in halfwords
-        return blockStart + (address - blockStart) / 2 + csa * 16;
-    }
-
     private ClutSlot GetClut(int cbp, int csa, int size, GsPsm cpsm)
     {
         ClutSlot? slot = Cluts.Find(c => c.Cbp == cbp && c.Csa == csa && c.Size == size && c.Cpsm == cpsm);
@@ -548,12 +563,28 @@ internal sealed class Tex1Analysis
             }
             else
             {
-                int half = HalfOfClut(cbp, address, csa);
+                // Read in the STORED order and untiled afterwards, exactly as Tex1Reader does, so the palette the
+                // editor shows and the palette the texture is drawn with can never be two different things.
+                int half = Tex1Reader.ClutHalf(cbp, csa, i, size);
                 slot.Colors[i] = BinaryPrimitives.ReadUInt16LittleEndian(memory.AsSpan(half * 2));
-                slot.Sources[i] = -1;
+                slot.Sources[i] = ByteSourceOfHalf(half);     // two bytes, not four - see TextureView.PaletteEntryBytes
                 slot.Nibbles.Add((long)half * 4, 4);
             }
         }
+        // A 256-entry palette is kept as 8x2 tiles; the pairs are put back the way Tex1Reader puts them back.
+        if (size == 256 && layout != GsFormat.CT32)
+        {
+            for (int i = 0; i < size; i++)
+            {
+                int tiled = Tex1Reader.TiledClutIndex(i);
+                if (tiled > i)
+                {
+                    (slot.Colors[i], slot.Colors[tiled]) = (slot.Colors[tiled], slot.Colors[i]);
+                    (slot.Sources[i], slot.Sources[tiled]) = (slot.Sources[tiled], slot.Sources[i]);
+                }
+            }
+        }
+
         slot.ContentHash = Hash(System.Runtime.InteropServices.MemoryMarshal.AsBytes(slot.Colors.AsSpan()), (ulong)size);
         Cluts.Add(slot);
         return slot;

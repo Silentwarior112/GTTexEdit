@@ -23,6 +23,7 @@ internal sealed class ResizeDialog : Form
         _view = view;
 
         Text = $"Resize t{view.Index}";
+        AppIcon.Wear(this);
         ClientSize = new Size(520, 210);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = MinimizeBox = false;

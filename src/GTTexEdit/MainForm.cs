@@ -65,6 +65,7 @@ internal sealed class MainForm : Form
     public MainForm(string? path)
     {
         Text = "GTTexEdit";
+        AppIcon.Wear(this);
         MinimumSize = new Size(900, 600);
         Size = new Size(1280, 820);
         StartPosition = FormStartPosition.CenterScreen;

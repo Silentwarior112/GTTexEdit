@@ -12,6 +12,7 @@ internal sealed class VariationFitDialog : Form
     private VariationFitDialog(string title, string paletteOnly, string paletteAndPixels)
     {
         Text = title;
+        AppIcon.Wear(this);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = MaximizeBox = false;

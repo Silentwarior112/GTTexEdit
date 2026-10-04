@@ -68,6 +68,7 @@ internal sealed class BufferBakerForm : Form
         }
 
         Text = $"Bake buffer {buffer.Index} of {set.Name}";
+        AppIcon.Wear(this);
         MinimumSize = new Size(880, 600);
         Size = new Size(1100, 720);
         StartPosition = FormStartPosition.CenterParent;

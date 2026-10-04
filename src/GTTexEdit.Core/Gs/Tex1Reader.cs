@@ -3,7 +3,8 @@ using System.Runtime.InteropServices;
 
 namespace GTTexEdit.Core.Gs;
 
-/* Tex1 (TextureSet1, GT3 / GT4 / TT)
+/* Tex1 (TextureSet1, GT3 / GT4 / TT), little-endian. 010 Editor template:
+ * https://github.com/Nenkai/GT-File-Specifications-Documentation/blob/master/Formats/GT4/GT4_Tex1_TexSet.bt
  *
  *   0x00 "Tex1"          0x04 u32 reloc ptr (0 on disk)   0x08 u32 0          0x0C u32 set size
  *   0x10 u16 base TBP (0, remapped at runtime)             0x12 u16 size of the set in GS blocks
@@ -359,15 +360,9 @@ internal sealed class Tex1Reader
                 break;
 
             case GsPsm.PSMCT16:
-                // A 16-bit palette is HALF the bytes of a 32-bit one, and it is packed that way: sixteen entries
-                // in the 32 bytes at CSA's slot, not spread across 64 taking every other halfword. Eight of them
-                // at CSA 0..7 fill a block exactly, which is how the originals store them - reading it as an 8x2
-                // area of 16-bit pixels instead makes such a texture come out blank.
-                int blockStart = cbp * GsFormat.BlockWords * 2;
                 for (int i = 0; i < clut.Length; i++)
                 {
-                    int address = GsMemory.Address(GsFormat.CT16, cbp, 1, i % width, i / width);
-                    int half = blockStart + (address - blockStart) / 2 + csa * 16;
+                    int half = ClutHalf(cbp, csa, i, clut.Length);
                     clut[i] = FromRgba5551(BinaryPrimitives.ReadUInt16LittleEndian(_gs.Raw.AsSpan(half * 2)));
                 }
                 break;
@@ -391,11 +386,48 @@ internal sealed class Tex1Reader
         return clut;
     }
 
+    /// <summary>
+    /// Which halfword of GS memory holds one entry of a 16-bit palette.
+    ///
+    /// The game's own code says how. When it binds a texture whose CSA is not 0, it hands the GS the CLUT load
+    /// with PSM forced to PSMT8 and CSA cleared (gfx_set_texture_regs), so the hardware loads TWO HUNDRED AND
+    /// FIFTY-SIX entries as a 16-wide block, and the texture then reads the sixteen sitting at CSA * 16 inside
+    /// that buffer. A texture at CSA 0 keeps its own PSM, so its sixteen are loaded in the 8x2 pattern a 4-bit
+    /// CLUT has.
+    ///
+    /// Reading every 16-bit palette one of those two ways gives entries that belong to other textures: they come
+    /// out as noise, or flat, or in somebody else's colours.
+    /// </summary>
+    public static int ClutHalf(int cbp, int csa, int entry, int size)
+    {
+        if (size == 256)
+            return GsMemory.Address(GsFormat.CT16, cbp, 1, entry % 16, entry / 16);
+
+        if (csa == 0)
+            return GsMemory.Address(GsFormat.CT16, cbp, 1, entry % 8, entry / 8);
+
+        int stored = TiledClutIndex(csa * 16 + entry);       // where it sits among the 256 the GS was told to load
+        return GsMemory.Address(GsFormat.CT16, cbp, 1, stored % 16, stored / 16);
+    }
+
     /// <summary>RGBA5551 as the GS stores it, to a 32-bit colour with GS alpha (0 or 0x80).</summary>
     public static uint FromRgba5551(ushort texel)
     {
         uint r = (uint)(texel & 0x1F), g = (uint)(texel >> 5 & 0x1F), b = (uint)(texel >> 10 & 0x1F);
         return (r << 3 | r >> 2) | (g << 3 | g >> 2) << 8 | (b << 3 | b >> 2) << 16 | ((texel & 0x8000) != 0 ? 0x80u : 0) << 24;
+    }
+
+    /// <summary>
+    /// A 32-bit colour carrying GS alpha back to RGBA5551, to the nearest five bits a channel. A 16-bit palette
+    /// holds one bit of alpha, so the colour either shows through or does not; everything between is rounded to
+    /// whichever it is nearer.
+    /// </summary>
+    public static ushort ToRgba5551(uint colour)
+    {
+        static uint Five(uint channel) => (channel * 31 + 127) / 255;
+
+        uint r = Five(colour & 0xFF), g = Five(colour >> 8 & 0xFF), b = Five(colour >> 16 & 0xFF);
+        return (ushort)(r | g << 5 | b << 10 | ((colour >> 24) >= 0x40 ? 0x8000u : 0));
     }
 
     /// <summary>

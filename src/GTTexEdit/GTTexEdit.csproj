@@ -9,6 +9,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>GTTexEdit</AssemblyName>
     <RootNamespace>GTTexEdit</RootNamespace>
+    <ApplicationIcon>GTTexEdit.ico</ApplicationIcon>
 
     <!-- Read by ApplicationConfiguration.Initialize() (Program.cs). -->
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
@@ -16,6 +17,10 @@
 
     <!-- BCL only: this project must never take a PackageReference. No trimming: WinForms does not support it. -->
   </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="GTTexEdit.ico" LogicalName="GTTexEdit.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\GTTexEdit.Core\GTTexEdit.Core.csproj" />

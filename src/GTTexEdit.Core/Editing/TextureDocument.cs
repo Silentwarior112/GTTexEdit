@@ -465,7 +465,7 @@ public sealed class TextureDocument
         }
 
         if (parts.Count == 0)
-            throw new InvalidDataException("Nothing in this file holds textures: no model container and no texture set was found in it.");
+            throw new InvalidDataException(WhyNothing(path, file));
 
         ContentKind kind = ContentScanner.Identify(file);
         string format = kind == ContentKind.Archive
@@ -483,6 +483,28 @@ public sealed class TextureDocument
     private static TextureSetLocation OwnSet(byte[] data) =>
         new(0, 0, -1, 0, System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(0x0C)),
             System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(data.AsSpan(0x14)), "the set");
+
+    /// <summary>
+    /// Why a file that opened holds nothing to edit. Almost always it is empty: an unpacking that gave the file
+    /// its right length and never filled it, with the real thing still compressed beside it. Saying which it is
+    /// saves the next person taking the tool's word that the file has no textures in it.
+    /// </summary>
+    private static string WhyNothing(string path, byte[] file)
+    {
+        int real = file.Length;
+        while (real > 0 && file[real - 1] == 0)
+            real--;
+
+        if (real * 20 >= file.Length)
+            return "Nothing in this file holds textures: no model container and no texture set was found in it.";
+
+        string compressed = path + ".ps2zip";
+        return $"This file holds nothing: {real:N0} of its {file.Length:N0} bytes are anything but zero, so it was "
+            + "unpacked into the right length and never filled."
+            + (File.Exists(compressed)
+                ? $" The compressed \"{System.IO.Path.GetFileName(compressed)}\" beside it is the real one - unpack that again."
+                : "");
+    }
 
     /// <summary>
     /// Writes the file to <paramref name="path"/>; a GT4 race car's main patch goes beside it as
