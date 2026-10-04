@@ -6,6 +6,7 @@ While not intended, the tool can also read any file that has a Tex1 embedded in 
 **Other Tex1 tools:**
 - [Tex1 plugin for Paint.NET](https://github.com/Silentwarior112/PDN-Plugins)  Directly edit loose Tex1 files
 - [GTGPB:](https://github.com/Silentwarior112/GTGPB/releases)  .gpb extractor + Tex1 converter
+- [GTPMB](https://github.com/Silentwarior112/GTPMB/releases)   .pmb / .mbl extractor + Tex1 converter
 
 ## What it does
 
