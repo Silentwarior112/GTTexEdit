@@ -142,14 +142,24 @@ internal sealed class Tex1Reader
         variant > 0 && variant < _clutPatchSets.Count && _clutPatchSets[variant][index] is not null
         && GetClutPointer(index, variant) != GetClutPointer(index, 0);
 
-    private (int Cbp, int Csa) GetClutPointer(int index, int variant = 0)
+    // A patch entry carries the palette's storage mode as well as its address, and the game writes all three into
+    // TEX0 (CPSM, CBP, CSA). It is not always the mode the texture's own registers name: measured over the 290 GT3
+    // menu cars, 133 entries in 45 cars switch a palette between PSMCT32 and PSMCT16 from one variation to the
+    // next, and reading one as the other gives that variation colours that are not there.
+    private (int Cbp, int Csa, GsPsm Cpsm) GetClutPointer(int index, int variant = 0)
     {
         uint? patch = variant < _clutPatchSets.Count ? _clutPatchSets[variant][index] : null;
         if (patch is null && variant > 0 && _clutPatchSets.Count > 0)
             patch = _clutPatchSets[0][index];
-        return patch is uint value
-            ? ((int)(value >> 5 & 0x3FFF), (int)(value & 0x1F))
-            : (_textures[index].Cbp, _textures[index].Csa);
+        if (patch is not uint value)
+            return (_textures[index].Cbp, _textures[index].Csa, _textures[index].Cpsm);
+
+        // Only PSMCT32 and PSMCT16 are ever named there (measured: 53,243 and 4,051 entries, nothing else), so
+        // anything else is a file we do not understand rather than a mode to read a palette in: keep tex0's.
+        var mode = (GsPsm)(value >> 19 & 0xF);
+        if (mode is not (GsPsm.PSMCT32 or GsPsm.PSMCT16 or GsPsm.PSMCT16S))
+            mode = _textures[index].Cpsm;
+        return ((int)(value >> 5 & 0x3FFF), (int)(value & 0x1F), mode);
     }
 
     // The layout a texture's pixels are read with; PSMCT24 occupies memory exactly like PSMCT32.
@@ -190,7 +200,7 @@ internal sealed class Tex1Reader
         {
             for (int variant = 0; variant < VariantCount; variant++)
             {
-                var (cbp, csa) = GetClutPointer(index, variant);
+                var (cbp, csa, _) = GetClutPointer(index, variant);
                 words = Math.Max(words, (long)cbp * GsFormat.BlockWords + GsFormat.PageWords + csa * 8);
             }
         }
@@ -209,7 +219,11 @@ internal sealed class Tex1Reader
     /// Where a texture's palette lives in GS memory. Textures with the same key share one palette, so recolouring
     /// it recolours all of them.
     /// </summary>
-    public (int Cbp, int Csa) GetPaletteKey(int index, int variant = 0) => GetClutPointer(index, variant);
+    public (int Cbp, int Csa) GetPaletteKey(int index, int variant = 0)
+    {
+        var (cbp, csa, _) = GetClutPointer(index, variant);
+        return (cbp, csa);
+    }
 
     /// <summary>
     /// PROVENANCE: for each palette entry of a texture (in the order pixel values index it), the offset inside the
@@ -225,7 +239,7 @@ internal sealed class Tex1Reader
         if (size == 0)
             return sources;
 
-        var (cbp, csa) = GetClutPointer(index, variant);
+        var (cbp, csa, _) = GetClutPointer(index, variant);
         return GetPaletteSourcesAt(cbp, csa, size);
     }
 
@@ -347,12 +361,11 @@ internal sealed class Tex1Reader
     // 16-colour CLUTs (CSA 0, 2, 4, 6).
     private uint[] ReadClut(int index, int variant, bool is256)
     {
-        var (cbp, csa) = GetClutPointer(index, variant);
+        var (cbp, csa, clutFormat) = GetClutPointer(index, variant);
         int width = is256 ? 16 : 8;
         int height = is256 ? 16 : 2;
         var clut = new uint[width * height];
 
-        GsPsm clutFormat = _textures[index].Cpsm;
         switch (clutFormat)
         {
             case GsPsm.PSMCT32:

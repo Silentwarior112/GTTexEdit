@@ -595,13 +595,22 @@ internal sealed class Tex1Analysis
     /// colour this way: every clut patch set points the textures at a different CLUT of the same Tex1, which is
     /// what a GT4 colour patch achieves by rewriting the CLUT words in place.
     /// </summary>
-    public (int Cbp, int Csa) ClutPointer(int texture, int variation)
+    /// <remarks>
+    /// The patch carries the palette's storage mode as well, and the game writes that into TEX0.CPSM: it is not
+    /// always the mode tex0 itself names, so a variation can read the very same texture's palette 16-bit where
+    /// the base reads it 32-bit (measured: 133 entries in 45 of the 290 GT3 menu cars).
+    /// </remarks>
+    public (int Cbp, int Csa, GsPsm Cpsm) ClutPointer(int texture, int variation)
     {
         ClutPatch? patch = ClutPatches.Find(p => p.Set == variation && p.Texture == texture)
                         ?? (variation > 0 ? ClutPatches.Find(p => p.Set == 0 && p.Texture == texture) : null);
-        return patch is not null
-            ? (patch.Cbp, patch.Csa)
-            : (Textures[texture].Registers.Cbp, Textures[texture].Registers.Csa);
+        if (patch is null)
+            return (Textures[texture].Registers.Cbp, Textures[texture].Registers.Csa, Textures[texture].Registers.Cpsm);
+
+        var mode = (GsPsm)patch.Format;
+        if (mode is not (GsPsm.PSMCT32 or GsPsm.PSMCT16 or GsPsm.PSMCT16S))
+            mode = Textures[texture].Registers.Cpsm;   // a mode no palette is ever held in; see Tex1Reader
+        return (patch.Cbp, patch.Csa, mode);
     }
 
     /// <summary>The CLUT a texture reads in one variation, with the file offsets of its entries.</summary>
@@ -609,9 +618,9 @@ internal sealed class Tex1Analysis
     {
         if (Textures[texture].PaletteSize == 0)
             return null;
-        var (cbp, csa) = ClutPointer(texture, variation);
-        return Cluts.Find(c => c.Cbp == cbp && c.Csa == csa && c.Size == Textures[texture].PaletteSize)
-            ?? GetClut(cbp, csa, Textures[texture].PaletteSize, Textures[texture].Registers.Cpsm);
+        var (cbp, csa, cpsm) = ClutPointer(texture, variation);
+        return Cluts.Find(c => c.Cbp == cbp && c.Csa == csa && c.Size == Textures[texture].PaletteSize && c.Cpsm == cpsm)
+            ?? GetClut(cbp, csa, Textures[texture].PaletteSize, cpsm);
     }
 
     private void AnalyseCluts()
@@ -623,9 +632,8 @@ internal sealed class Tex1Analysis
 
             // Clut patch set 0 is the base look and overrides tex0's own pointer (see Tex1Reader).
             ClutPatch? basePatch = ClutPatches.Find(p => p.Set == 0 && p.Texture == t.Index);
-            t.Clut = basePatch is null
-                ? GetClut(t.Registers.Cbp, t.Registers.Csa, t.PaletteSize, t.Registers.Cpsm)
-                : GetClut(basePatch.Cbp, basePatch.Csa, t.PaletteSize, t.Registers.Cpsm);
+            var (baseCbp, baseCsa, baseCpsm) = ClutPointer(t.Index, 0);
+            t.Clut = GetClut(baseCbp, baseCsa, t.PaletteSize, baseCpsm);
             t.Clut.Users.Add(t.Index);
             if (basePatch is not null && (basePatch.Cbp != t.Registers.Cbp || basePatch.Csa != t.Registers.Csa))
                 Problems.Add($"texture {t.Index}: clut patch set 0 points at {basePatch.Cbp}/{basePatch.Csa}, tex0 at {t.Registers.Cbp}/{t.Registers.Csa}");
@@ -636,7 +644,8 @@ internal sealed class Tex1Analysis
             if (patch.Set == 0 || patch.Texture >= Textures.Length || Textures[patch.Texture].PaletteSize == 0)
                 continue;
             Texture t = Textures[patch.Texture];
-            ClutSlot slot = GetClut(patch.Cbp, patch.Csa, t.PaletteSize, t.Registers.Cpsm);
+            var (_, _, cpsm) = ClutPointer(t.Index, patch.Set);
+            ClutSlot slot = GetClut(patch.Cbp, patch.Csa, t.PaletteSize, cpsm);
             if (slot != t.Clut)
                 slot.VariantUsers.Add((t.Index, patch.Set));
         }

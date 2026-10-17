@@ -9,16 +9,17 @@ namespace GTTexEdit.Core.Editing;
 /// <summary>One pglu texture: a reading of a buffer's texels through a palette of its own.</summary>
 public sealed class TextureView
 {
-    internal TextureView(GsView view, int buffer, bool isWindow, int[][] paletteSources) =>
-        Adopt(view, buffer, isWindow, paletteSources);
+    internal TextureView(GsView view, int buffer, bool isWindow, int[][] paletteSources, int[] entryBytes) =>
+        Adopt(view, buffer, isWindow, paletteSources, entryBytes);
 
     /// <summary>
     /// Takes on what the set says about this view now. A set reads its own structure again whenever something
     /// changes where its palettes live, and the view keeps its identity through that, so whoever is holding it -
     /// the window, a sheet being imported - is not left pointing at where a palette USED to be.
     /// </summary>
-    [System.Diagnostics.CodeAnalysis.MemberNotNull(nameof(Format), nameof(Filter), nameof(Wrap), nameof(SourcesByVariation))]
-    internal void Adopt(GsView view, int buffer, bool isWindow, int[][] paletteSources)
+    [System.Diagnostics.CodeAnalysis.MemberNotNull(nameof(Format), nameof(Filter), nameof(Wrap), nameof(SourcesByVariation),
+                                                   nameof(EntryBytesByVariation))]
+    internal void Adopt(GsView view, int buffer, bool isWindow, int[][] paletteSources, int[] entryBytes)
     {
         PgluTexture r = view.Texture.Registers;
         Index = view.Index;
@@ -34,7 +35,7 @@ public sealed class TextureView
         Tfx = r.Tfx;
         IsWindow = isWindow;
         SourcesByVariation = paletteSources;
-        PaletteEntryBytes = r.Cpsm is GsPsm.PSMCT16 or GsPsm.PSMCT16S ? 2 : 4;
+        EntryBytesByVariation = entryBytes;
     }
 
     /// <summary>
@@ -44,7 +45,10 @@ public sealed class TextureView
     /// </summary>
     internal int[][] SourcesByVariation { get; private set; }
 
-    public int[] SourcesFor(int variation) => SourcesByVariation[Math.Clamp(variation, 0, SourcesByVariation.Length - 1)];
+    // A variation this view's set does not reach shows the set's BASE look, which is row 0 (clut patch set 0), not
+    // the last variation it does reach: see TextureSet.Own.
+    public int[] SourcesFor(int variation) =>
+        SourcesByVariation[variation >= 0 && variation < SourcesByVariation.Length ? variation : 0];
 
     /// <summary>
     /// Where one palette entry's four bytes are in the model, or -1 when this view has no such entry at all.
@@ -76,7 +80,13 @@ public sealed class TextureView
     /// (RGBA5551 - five bits a channel and one bit of alpha). GT3 courses and cars use those for about one
     /// texture in twelve; GT4 cars use none.
     /// </summary>
-    public int PaletteEntryBytes { get; private set; } = 4;
+    public int PaletteEntryBytes => EntryBytesByVariation[0];
+
+    /// <summary>The same, per variation: a clut patch can switch the palette's storage mode along with its address.</summary>
+    public int PaletteEntryBytesIn(int variation) =>
+        EntryBytesByVariation[variation >= 0 && variation < EntryBytesByVariation.Length ? variation : 0];
+
+    internal int[] EntryBytesByVariation { get; private set; }
 
     public int Cbp { get; private set; }
     public int Csa { get; private set; }
@@ -284,23 +294,29 @@ public sealed class TextureSet
             foreach (GsView view in buffer.Views)
             {
                 var sources = new int[VariationCount][];
+                var entryBytes = new int[VariationCount];
                 for (int variation = 0; variation < VariationCount; variation++)
                 {
                     Tex1Analysis.ClutSlot? clut = Variations == VariationSource.ClutPatch
                         ? _structure.ClutFor(view.Index, variation)
                         : view.Clut;
                     sources[variation] = [.. (clut?.Sources ?? []).Select(o => o < 0 ? -1 : o + _location.Offset)];
+
+                    // A variation can read the palette in another storage mode than the base does - the clut patch
+                    // carries the mode too - and then an entry is two bytes here and four there.
+                    GsPsm mode = clut?.Cpsm ?? view.Texture.Registers.Cpsm;
+                    entryBytes[variation] = mode is GsPsm.PSMCT16 or GsPsm.PSMCT16S ? 2 : 4;
                 }
                 bool isWindow = view.Placement != buffer.Views[0].Placement;
                 TextureView info;
                 if (existing.TryGetValue(view.Index, out TextureView? kept))
                 {
-                    kept.Adopt(view, buffers.Count, isWindow, sources);
+                    kept.Adopt(view, buffers.Count, isWindow, sources, entryBytes);
                     info = kept;
                 }
                 else
                 {
-                    info = new TextureView(view, buffers.Count, isWindow, sources);
+                    info = new TextureView(view, buffers.Count, isWindow, sources, entryBytes);
                 }
                 _gsViews[view.Index] = view;
                 bufferViews.Add(info);
@@ -332,6 +348,30 @@ public sealed class TextureSet
 
     /// <summary>Which mechanism switches them.</summary>
     public VariationSource Variations { get; private set; }
+
+    /// <summary>
+    /// Whether this set's own list reaches a variation of the file. The file has as many variations as its body
+    /// model does, and a GT3 car's wheel model sometimes holds a different number: of the 195 menu cars with
+    /// variations, three hold fewer there (4, 5 and 23 against the body's 17, 22 and 27) and three hold more.
+    /// </summary>
+    public bool HasVariation(int variation) => variation >= 0 && variation < VariationCount;
+
+    /// <summary>
+    /// Which of the set's OWN variations an index of the file means. One its table does not reach means the base
+    /// look - the game's tex1_select_variation returns without touching a register for an index past the table's
+    /// count, and the base look is clut patch set 0 - rather than the last variation it does reach, which is a real
+    /// colour of the car: showing that one draws the wrong picture, and writing to it changes the wrong colour.
+    /// </summary>
+    private int Own(int variation) => HasVariation(variation) ? variation : 0;
+
+    /// <summary>
+    /// Why this variation cannot be given a look of its own in this set, or null when it can. A set that has no
+    /// variations AT ALL is not one of those: its single look is what every variation of the car shows, and
+    /// editing it - which reaches all of them - is the only way to edit it at all.
+    /// </summary>
+    public string? WhyNotVariation(int variation) => Variations == VariationSource.None || HasVariation(variation) ? null
+        : $"this set has {VariationCount} variation(s) of its own, so variation {variation} shows its base look; " +
+          "the game selects nothing at all for an index its table does not reach.";
 
     public int PaintCount => _model.PaintCount;
 
@@ -371,15 +411,14 @@ public sealed class TextureSet
     /// </summary>
     public int SeparatePalettes(int variation)
     {
-        if (Variations != VariationSource.ClutPatch)
+        if (Variations != VariationSource.ClutPatch || !HasVariation(variation))
             return 0;
-        variation = Math.Clamp(variation, 0, VariationCount - 1);
         return VariationBuilder.MakePalettesPrivate(_model, this, variation);
     }
 
     /// <summary>Whether this variation reads a palette another variation reads too.</summary>
     public bool PalettesAreShared(int variation) =>
-        Variations == VariationSource.ClutPatch && VariationBuilder.PalettesAreShared(this, Math.Clamp(variation, 0, VariationCount - 1));
+        Variations == VariationSource.ClutPatch && VariationBuilder.PalettesAreShared(this, Own(variation));
 
     public int BlockCount => _layout.BlockCount;
     public int PixelBlocks => _layout.PixelBlocks;
@@ -405,7 +444,7 @@ public sealed class TextureSet
 
     private Tex1Reader Reader(int variation)
     {
-        variation = Math.Clamp(variation, 0, VariationCount - 1);
+        variation = Own(variation);
         if (!_readers.TryGetValue(variation, out Tex1Reader? reader))
             _readers[variation] = reader = new Tex1Reader(Data(variation));
         return reader;
@@ -782,7 +821,7 @@ public sealed class TextureSet
 
     /// <summary>A view as the game draws it, in one variation.</summary>
     public RgbaImage Render(TextureView view, int variation = 0) => Variations == VariationSource.ClutPatch
-        ? Reader(0).Decode(view.Index, Math.Clamp(variation, 0, VariationCount - 1))
+        ? Reader(0).Decode(view.Index, Own(variation))
         : Reader(variation).Decode(view.Index);
 
     /// <summary>Where one view's palette entry lives in the model - for tools that want to see what is shared.</summary>
@@ -800,14 +839,19 @@ public sealed class TextureSet
             return 0;
 
         Span<byte> bytes = stackalloc byte[4];
-        _model.ReadBytes(ByteVariation(variation), source, bytes[..view.PaletteEntryBytes]);
-        uint stored = view.PaletteEntryBytes == 2
+        int width = view.PaletteEntryBytesIn(Own(variation));
+        _model.ReadBytes(ByteVariation(variation), source, bytes[..width]);
+        uint stored = width == 2
             ? Tex1Reader.FromRgba5551(BinaryPrimitives.ReadUInt16LittleEndian(bytes))
             : BinaryPrimitives.ReadUInt32LittleEndian(bytes);
         return Tex1Reader.GsToPngAlpha(stored);
     }
 
     public bool IsPaletteEntryEditable(TextureView view, int entry) => view.SourceOf(entry) >= 0;
+
+    /// <summary>The same, for one variation: a set whose table does not reach it cannot be edited there at all.</summary>
+    public bool IsPaletteEntryEditable(TextureView view, int entry, int variation) =>
+        WhyNotVariation(variation) is null && view.SourceOf(entry, variation) >= 0;
 
     /// <summary>
     /// The OTHER variations that read this very palette entry, so changing it changes what they show too. A GT4
@@ -833,10 +877,12 @@ public sealed class TextureSet
         if (Variations != VariationSource.ClutPatch)
             return _model.GetCoverage(view.SourceOf(entry), view.PaletteEntryBytes);
 
-        // GT3 gives each variation its own palette, so an entry varies when those palettes disagree about it.
+        // GT3 gives each variation its own palette, so an entry varies when those palettes disagree about it - or
+        // when they hold it in different storage modes, which is a different colour from the same address.
         for (int variation = 1; variation < VariationCount; variation++)
         {
-            if (view.SourceOf(entry, variation) != view.SourceOf(entry))
+            if (view.SourceOf(entry, variation) != view.SourceOf(entry)
+                || view.PaletteEntryBytesIn(variation) != view.PaletteEntryBytesIn(0))
                 return Coverage.Full;
         }
         return Coverage.None;
@@ -989,7 +1035,7 @@ public sealed class TextureSet
     /// </summary>
     private int EntryBytes(TextureView view, int source, int variation, uint color, Span<byte> bytes)
     {
-        int width = view.PaletteEntryBytes;
+        int width = view.PaletteEntryBytesIn(Own(variation));
         Span<byte> had = stackalloc byte[4];
         _model.ReadBytes(ByteVariation(variation), source, had[..width]);
 
@@ -1037,7 +1083,8 @@ public sealed class TextureSet
     public bool SetPaletteColor(TextureView view, int entry, uint color, int variation)
     {
         ArgumentNullException.ThrowIfNull(view);
-        variation = Math.Clamp(variation, 0, VariationCount - 1);
+        if (WhyNotVariation(variation) is string why)
+            throw new InvalidOperationException($"Variation {variation} cannot be edited here: {why}");
         if (view.SourceOf(entry, variation) < 0)
             throw new InvalidOperationException("This palette entry is not stored as plain bytes in the file and cannot be edited.");
         if (GetPaletteColor(view, entry, variation) == color)
@@ -1109,7 +1156,7 @@ public sealed class TextureSet
 
         ReadOnlySpan<uint> wanted = MemoryMarshal.Cast<byte, uint>(image.Pixels);
         int rows = view.PaletteSize;
-        byte[] indices = GetIndices(view, Math.Clamp(variation, 0, VariationCount - 1));
+        byte[] indices = GetIndices(view, Own(variation));
         var sum = new double[rows * 4];
         var count = new long[rows];
         for (int i = 0; i < indices.Length && i < wanted.Length; i++)
@@ -1147,8 +1194,9 @@ public sealed class TextureSet
         CheckSize(view, image);
         if (view.PaletteSize == 0)
             throw new NotSupportedException("This view is true colour; it has no palette a variation could switch.");
+        if (WhyNotVariation(variation) is string why)
+            throw new InvalidOperationException($"Variation {variation} cannot be given a picture of its own here: {why}");
 
-        variation = Math.Clamp(variation, 0, VariationCount - 1);
         ReadOnlySpan<uint> target = MemoryMarshal.Cast<byte, uint>(image.Pixels);
         TextureBuffer buffer = Buffers[view.Buffer];
         int rows = view.PaletteSize, added = _model.PatchBytesAdded, pixels = 0, entries;
@@ -1261,6 +1309,40 @@ public sealed class TextureSet
     /// </summary>
     public ImportResult Import(TextureView view, RgbaImage image, ImportOptions options)
     {
+        var (chosen, indices, mine, disturbed, others) = Snap(view, image, options);
+        ReadOnlySpan<uint> target = MemoryMarshal.Cast<byte, uint>(image.Pixels);
+
+        int before = _model.PatchBytesDropped;
+        SetIndices(view, chosen);
+        int moved = 0;
+        for (int i = 0; i < chosen.Length; i++)
+        {
+            if (chosen[i] != indices[i])
+                moved++;
+        }
+
+        int unstored = UnstoredTexels(view);
+        string summary = (others == 0
+            ? $"{moved} of {chosen.Length} texels re-indexed onto the existing {view.PaletteSize} colours"
+            : $"{moved} of {chosen.Length} texels re-indexed; {disturbed} of them also change what {others} other view(s) show")
+            + (unstored > 0 ? $"; {unstored} texels are declared but not stored in this set and were left out" : "");
+        return new ImportResult(moved, 0, _model.PatchBytesDropped - before, MeanError(target, chosen, mine), summary);
+    }
+
+    /// <summary>
+    /// How close <see cref="Import"/> would come, without writing anything: the mean error per channel, 0..255.
+    /// An editor needs it BEFORE the import, because the honest answer - whether the colours already there can
+    /// carry this picture at all - is what decides between keeping them and re-solving the buffer.
+    /// </summary>
+    public double PreviewImportError(TextureView view, RgbaImage image, ImportOptions options)
+    {
+        var (chosen, _, mine, _, _) = Snap(view, image, options);
+        return MeanError(MemoryMarshal.Cast<byte, uint>(image.Pixels), chosen, mine);
+    }
+
+    // The tier 1 decision itself: which index every texel takes. Writes nothing.
+    private (byte[] Chosen, byte[] Indices, uint[] Mine, int Disturbed, int Others) Snap(TextureView view, RgbaImage image, ImportOptions options)
+    {
         ArgumentNullException.ThrowIfNull(image);
         ArgumentNullException.ThrowIfNull(options);
         CheckSize(view, image);
@@ -1328,21 +1410,7 @@ public sealed class TextureSet
             }
         }
 
-        int before = _model.PatchBytesDropped;
-        SetIndices(view, chosen);
-        int moved = 0;
-        for (int i = 0; i < chosen.Length; i++)
-        {
-            if (chosen[i] != indices[i])
-                moved++;
-        }
-
-        int unstored = UnstoredTexels(view);
-        string summary = (others.Count == 0
-            ? $"{moved} of {chosen.Length} texels re-indexed onto the existing {rows} colours"
-            : $"{moved} of {chosen.Length} texels re-indexed; {disturbed} of them also change what {others.Count} other view(s) show")
-            + (unstored > 0 ? $"; {unstored} texels are declared but not stored in this set and were left out" : "");
-        return new ImportResult(moved, 0, _model.PatchBytesDropped - before, MeanError(target, chosen, mine), summary);
+        return (chosen, indices, mine, disturbed, others.Count);
     }
 
     /// <summary>

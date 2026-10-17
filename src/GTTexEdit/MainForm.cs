@@ -567,7 +567,7 @@ internal sealed class MainForm : Form
         {
             cells[entry] = new PaletteCell(
                 _set.GetPaletteColor(_view, entry, Variation),
-                _set.IsPaletteEntryEditable(_view, entry),
+                _set.IsPaletteEntryEditable(_view, entry, Variation),
                 _set.GetEntryCoverage(_view, entry) != Coverage.None);
         }
         _palette.SetCells(cells);
@@ -614,6 +614,14 @@ internal sealed class MainForm : Form
         {
             lines.Add($"{painted} palette entr{(painted == 1 ? "y is" : "ies are")} switched by its {_set.VariationCount} variations:");
             lines.Add("each variation is a whole alternative picture. Pick one above and import into it to replace just that one.");
+        }
+        if (_set.WhyNotVariation(Variation) is string why)
+        {
+            lines.AddRange([
+                "",
+                $"Variation {Variation} is not one of this set's own: {why}",
+                "What is on screen is that base look, and editing it here would change every variation that shares it.",
+            ]);
         }
         if (buffer.HasWindows)
             lines.Add($"It also holds a window: giving every view its own pixels would cost {buffer.DetachedBlocks} blocks instead of {buffer.Blocks}.");
@@ -671,7 +679,18 @@ internal sealed class MainForm : Form
     {
         if (_set is null || _view is null || _palette.SelectedEntry < 0)
         {
-            _entry.Text = _view is null ? "" : "Select a palette entry.";
+            _entry.Text = _view is null ? ""
+                : _set?.WhyNotVariation(Variation) is string none
+                    ? $"Variation {Variation} is not one of this set's own: {none}\n"
+                    + "These are the colours of its base look, which the tool will not edit under another variation's name."
+                    : "Select a palette entry.";
+            return;
+        }
+
+        if (_set.WhyNotVariation(Variation) is string why)
+        {
+            _entry.Text = $"Entry {_palette.SelectedEntry} of t{_view.Index}, as this set's BASE look shows it.\n"
+                + $"Variation {Variation} is not one of its own: {why}";
             return;
         }
 
@@ -698,6 +717,11 @@ internal sealed class MainForm : Form
     {
         if (_set is null || view is null || entry < 0 || entry >= view.PaletteSize || !_set.IsPaletteEntryEditable(view, entry))
             return;
+        if (_set.WhyNotVariation(Variation) is string why)
+        {
+            Status($"not here: {why}");
+            return;
+        }
 
         uint current = _set.GetPaletteColor(view, entry, Variation);
         using var dialog = new ColorDialog { Color = Bitmaps.ToColor(current | 0xFF000000), FullOpen = true, AnyColor = true };
@@ -715,6 +739,11 @@ internal sealed class MainForm : Form
     {
         if (_loading || _set is null || _view is null || _palette.SelectedEntry < 0)
             return;
+        if (_set.WhyNotVariation(Variation) is string why)
+        {
+            Status($"not here: {why}");
+            return;
+        }
         int entry = _palette.SelectedEntry;
         uint color = _set.GetPaletteColor(_view, entry, Variation);
         uint wanted = (color & 0x00FFFFFF) | (uint)_alpha.Value << 24;
@@ -726,6 +755,7 @@ internal sealed class MainForm : Form
     }
 
     // With variations, a colour belongs to the variation on screen; without them there is nothing to keep apart.
+    // A set that does not hold the variation on screen is not written to at all - the callers ask first.
     private bool SetColor(TextureView view, int entry, uint color) => _set!.VariationCount > 1
         ? _set.SetPaletteColor(view, entry, color, Variation)
         : _set.SetPaletteColor(view, entry, color);
@@ -764,6 +794,13 @@ internal sealed class MainForm : Form
         {
             MessageBox.Show(this, $"The image is {image.Width}x{image.Height}; this view is {_view.Width}x{_view.Height}.\n\n"
                 + "Textures keep their size here, because the GS layout of the whole set is built around it.",
+                "GTTexEdit", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        if (_set.WhyNotVariation(Variation) is string why)
+        {
+            MessageBox.Show(this, $"Variation {Variation} cannot be imported into here: {why}\n\n"
+                + "Pick a variation this set holds, or add one so that it does.",
                 "GTTexEdit", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
@@ -882,6 +919,61 @@ internal sealed class MainForm : Form
     private static (int Width, int Height) SheetSize(TextureBuffer buffer) =>
         (buffer.Views.Max(v => v.Width), buffer.Views.Sum(v => v.Height) + 3 * (buffer.Views.Count - 1));
 
+    /// <summary>
+    /// Whether to keep the colours the buffer already has. An import snaps the picture onto them and changes no
+    /// palette entry, which is the right thing for a buffer several views or variations were built around - and
+    /// quite wrong for a picture whose colours are simply not in there, where it comes out washed out and nothing
+    /// says why. So both ways are measured first and the question is asked with the two numbers, unless keeping
+    /// them is already as good as fitting new ones. Null means the import was called off.
+    /// </summary>
+    private bool? AskHowToFit(TextureBuffer buffer, ViewImage target)
+    {
+        if (_set is null)
+            return true;
+
+        double keeping, fitting;
+        try
+        {
+            var options = new RequantizeOptions { PreserveOthers = Protect, Dither = _dither.Checked };
+            keeping = _set.PreviewImportError(target.View, target.Image, new ImportOptions { ProtectOthers = Protect, Dither = _dither.Checked });
+            IReadOnlyList<RgbaImage> preview = _set.PreviewRequantize(buffer, [target], options);
+            int at = buffer.Views.ToList().FindIndex(v => v.Index == target.View.Index);
+            fitting = at < 0 || at >= preview.Count ? keeping : MeanError(preview[at], target.Image);
+        }
+        catch (Exception e) when (e is InvalidOperationException or NotSupportedException or ArgumentException)
+        {
+            return true;   // nothing to choose between; let the import itself report what is wrong
+        }
+
+        if (fitting >= keeping - 0.5)
+            return true;
+
+        int painted = _set.PaintedEntriesIn(buffer);
+        int others = buffer.Views.Count - 1;
+        string cost = others > 0 || painted > 0
+            ? "    It also " + string.Join(" and ", new[]
+                {
+                    others > 0 ? $"re-fits the {others} other view(s) of this buffer onto the same texels" : null,
+                    painted > 0 ? $"gives up the {painted} palette entries the variations recolour" : null,
+                }.Where(s => s is not null)) + "."
+            : "    Nothing else reads this buffer, so nothing else changes.";
+
+        return VariationFitDialog.AskKeepOrResolve(this,
+            $"t{target.View.Index}  ({target.View.Width}x{target.View.Height}, {target.View.PaletteSize} colours)",
+            $"Snaps the picture onto the {target.View.PaletteSize} colours the buffer already has, changing no palette entry.\n"
+            + $"    It would be off by {keeping:0.0} of 255 per channel.",
+            $"Re-solves this buffer: its palette AND its texels are derived from the picture.\n"
+            + $"    It would be off by {fitting:0.0} instead.\n{cost}");
+    }
+
+    private static double MeanError(RgbaImage got, RgbaImage wanted)
+    {
+        double sum = 0;
+        for (int i = 0; i < got.Pixels.Length && i < wanted.Pixels.Length; i++)
+            sum += Math.Abs(got.Pixels[i] - wanted.Pixels[i]);
+        return got.Pixels.Length == 0 ? 0 : sum / got.Pixels.Length;
+    }
+
     private void Apply(TextureBuffer buffer, IReadOnlyList<ViewImage> images, bool wholeSheet = false)
     {
         if (_set is null)
@@ -889,7 +981,17 @@ internal sealed class MainForm : Form
 
         // A whole sheet can only mean "re-solve": it gives every view a picture of its own.
         bool requantize = _requantize.Checked || wholeSheet;
-        int painted = requantize ? _set.PaintedEntriesIn(buffer) : 0;
+        bool asked = false;
+        if (!requantize)
+        {
+            bool? keep = AskHowToFit(buffer, images[0]);
+            if (keep is null)
+                return;
+            requantize = keep == false;
+            asked = requantize;   // that question already said what re-solving gives up
+        }
+
+        int painted = requantize && !asked ? _set.PaintedEntriesIn(buffer) : 0;
         if (painted > 0 && !Confirm($"{painted} palette entries of this buffer are recoloured by its {_set.PaintCount} variations.\n\n"
                                   + "Re-solving the buffer gives that up: every one will then show the new colours. Continue?"))
             return;

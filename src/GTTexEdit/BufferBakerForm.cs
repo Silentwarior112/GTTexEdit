@@ -78,6 +78,7 @@ internal sealed class BufferBakerForm : Form
         BuildLayout();
         FillTargets();
         _target.SelectedIndex = 0;
+        ShowTarget();   // FillTargets picks the first view with the events off, so nothing has drawn the canvas yet
     }
 
     /// <summary>What the bake did, once it ran.</summary>

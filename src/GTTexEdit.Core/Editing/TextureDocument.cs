@@ -114,8 +114,20 @@ public sealed class TexturePart
         : Kind == ContentKind.ModelSet2 ? Model.PaintCount
         : _materials.Arrays.Count;
 
-    /// <summary>Which set of material values a variation uses. GT3 keeps its base array first, so they are offset by one.</summary>
-    public int MaterialSetForVariation(int variation) => Kind == ContentKind.ModelSet2
+    /// <summary>
+    /// Whether this part holds a variation of the file at all. Its own list can be shorter than the file's: see
+    /// <see cref="TextureSet.HasVariation"/>, and <see cref="TextureDocument.VariationCount"/> for who decides.
+    /// </summary>
+    public bool HasVariation(int variation) => variation >= 0 && variation < VariationCount;
+
+    /// <summary>
+    /// Which set of material values a variation uses. GT3 keeps its base array first, so they are offset by one.
+    /// A variation this part does not hold draws with the BASE array, because the game leaves the materials alone
+    /// for an index its table does not reach (modelset_select_material_set checks i &lt; nMaterialSets) - and the
+    /// last array it does hold belongs to a colour that is really in use.
+    /// </summary>
+    public int MaterialSetForVariation(int variation) => !HasVariation(variation) ? 0
+        : Kind == ContentKind.ModelSet2
         ? Math.Clamp(variation, 0, Math.Max(0, MaterialSetCount - 1))
         : Math.Clamp(variation + (_materials.Arrays.Count > 1 ? 1 : 0), 0, Math.Max(0, MaterialSetCount - 1));
 
@@ -294,8 +306,15 @@ public sealed class TextureDocument
     /// <summary>
     /// Variations of the whole file. A GT4 car carries them in its colour patch; a GT3 car carries them in the clut
     /// patch tables of its texture sets and one material array each. Everything else has one.
+    ///
+    /// It is the FIRST part that has them - the body - that says how many, because that is what the game asks: a
+    /// car's colours are tex1_variation_count(body->tex[0]), and a colour past that is replaced by another one
+    /// (car_get_load_car). The other parts are not polled for a larger number, and a GT3 car's wheel model often
+    /// holds one: six of the 195 menu cars with variations disagree between their parts, in both directions, and
+    /// the wheels' extra tables are simply never selected, because the colour index cannot reach them.
     /// </summary>
-    public int VariationCount => Parts.Count > 0 ? Parts.Max(p => p.VariationCount) : 1;
+    public int VariationCount => Parts.FirstOrDefault(p => p.Variations != VariationSource.None)?.VariationCount
+        ?? (Parts.Count > 0 ? Parts.Max(p => p.VariationCount) : 1);
 
     public bool IsModified => Parts.Any(p => p.IsModified);
 
@@ -341,8 +360,16 @@ public sealed class TextureDocument
         if (Variations == VariationSource.ClutPatch)
         {
             index = VariationCount;
+
+            // Only the parts whose own list ENDS where the new variation begins. A part that already holds a table
+            // at this index (a wheel model with more of them than the body) would take a second one it can never
+            // select; one that stops short of it would have the new table land on an index another colour is using,
+            // which is that colour quietly changing. Both keep the base look for the new variation, as the game does.
             foreach (TexturePart part in Parts.Where(p => p.Variations == VariationSource.ClutPatch))
-                VariationBuilder.Add(part, copyOf);
+            {
+                if (part.VariationCount == index)
+                    VariationBuilder.Add(part, copyOf);
+            }
         }
         else
         {
@@ -360,9 +387,11 @@ public sealed class TextureDocument
             throw new InvalidOperationException("There has to be at least one variation.");
         index = Math.Clamp(index, 0, VariationCount - 1);
 
-        foreach (Pat0 patch in Patches)
-            patch.RemovePaint(Math.Clamp(index, 0, patch.PaintCount - 1));
-        foreach (TexturePart part in Parts.Where(p => p.Variations == VariationSource.ClutPatch))
+        // A part is only touched where it holds that index itself. One that stops short of it does not hold this
+        // colour at all, and taking an entry out of it anyway would take another colour's (see AddVariation).
+        foreach (Pat0 patch in Patches.Where(p => index < p.PaintCount))
+            patch.RemovePaint(index);
+        foreach (TexturePart part in Parts.Where(p => p.Variations == VariationSource.ClutPatch && index < p.VariationCount))
             VariationTables.Remove(part, index);
         Touch();
     }
@@ -372,9 +401,10 @@ public sealed class TextureDocument
         from = Math.Clamp(from, 0, VariationCount - 1);
         to = Math.Clamp(to, 0, VariationCount - 1);
 
-        foreach (Pat0 patch in Patches)
-            patch.MovePaint(Math.Clamp(from, 0, patch.PaintCount - 1), Math.Clamp(to, 0, patch.PaintCount - 1));
-        foreach (TexturePart part in Parts.Where(p => p.Variations == VariationSource.ClutPatch))
+        foreach (Pat0 patch in Patches.Where(p => from < p.PaintCount && to < p.PaintCount))
+            patch.MovePaint(from, to);
+        foreach (TexturePart part in Parts.Where(p => p.Variations == VariationSource.ClutPatch
+                                                  && from < p.VariationCount && to < p.VariationCount))
             VariationTables.Move(part, from, to);
         Touch();
     }
@@ -383,14 +413,13 @@ public sealed class TextureDocument
     // variations itself changed; the model also has to count as edited.
     private void Touch()
     {
+        // Read again rather than only marking the sets stale. How many variations there are is answered from what
+        // the last read found, and a set that still believes the old number clamps a write to the NEW variation
+        // down into the old last one - which is a sheet imported into the wrong colour of the car.
         foreach (TexturePart part in Parts)
         {
             part.Model.Touch();
-            if (part.Variations == VariationSource.ClutPatch)
-                part.Rebuild();
-            else
-                foreach (TextureSet set in part.Sets)
-                    set.Invalidate();
+            part.Rebuild();
         }
     }
 
