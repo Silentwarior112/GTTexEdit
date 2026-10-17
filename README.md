@@ -12,7 +12,7 @@ While not intended, the tool can also read any file that has a Tex1 embedded in 
 
 ### Texture list & Viewer
 <p align="center">
-  <img src="https://github.com/Silentwarior112/GTTexEdit/blob/main/docs/variation-editor.png">
+  <img src="https://github.com/Silentwarior112/GTTexEdit/blob/main/docs/texture-editor.png">
 </p>
 
 - The tool presents the content of a Tex1 on a per-buffer level, as those are the real objects inside them.
